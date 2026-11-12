@@ -17,8 +17,11 @@ logs/
 # ── Input PDFs (user-specific) ──
 input/
 
-# ── Bark model weights ──
+# ── Bark model weights & tools ──
 models/
+tools/
+*.part
+*.part*
 
 # ── IDE / Editor ──
 .vscode/

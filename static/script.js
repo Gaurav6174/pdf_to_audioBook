@@ -3,8 +3,43 @@ const pdfInput      = document.getElementById("pdfInput");
 const fileSelected  = document.getElementById("fileSelected");
 const fileName      = document.getElementById("fileName");
 
+const engineSelect  = document.getElementById("engineSelect");
 const voiceSelect   = document.getElementById("voiceSelect");
 const resetToggle   = document.getElementById("resetToggle");
+
+const ENGINE_VOICES = {
+    zonos2: [
+        { value: "AmericanMale", label: "American Male (Default) ★" },
+        { value: "AmericanFemale", label: "American Female" },
+        { value: "BritishFemale", label: "British Female" }
+    ],
+    bark: [
+        { value: "v2/en_speaker_6", label: "en_speaker_6 — Male, Natural ★" },
+        { value: "v2/en_speaker_0", label: "en_speaker_0 — Male, Deep" },
+        { value: "v2/en_speaker_1", label: "en_speaker_1 — Male, Neutral" },
+        { value: "v2/en_speaker_2", label: "en_speaker_2 — Male, Clear" },
+        { value: "v2/en_speaker_3", label: "en_speaker_3 — Male, Expressive" },
+        { value: "v2/en_speaker_4", label: "en_speaker_4 — Male, Soft" },
+        { value: "v2/en_speaker_5", label: "en_speaker_5 — Female, Neutral" },
+        { value: "v2/en_speaker_7", label: "en_speaker_7 — Female, Clear" },
+        { value: "v2/en_speaker_8", label: "en_speaker_8 — Female, Expressive" },
+        { value: "v2/en_speaker_9", label: "en_speaker_9 — Female, Soft" }
+    ]
+};
+
+function updateVoiceOptions() {
+    const engine = engineSelect ? engineSelect.value : "zonos2";
+    const voices = ENGINE_VOICES[engine] || ENGINE_VOICES.zonos2;
+    voiceSelect.innerHTML = "";
+    voices.forEach((v, idx) => {
+        const opt = document.createElement("option");
+        opt.value = v.value;
+        opt.textContent = v.label;
+        if (idx === 0) opt.selected = true;
+        voiceSelect.appendChild(opt);
+    });
+    updateTerminalHint();
+}
 
 const btnGenerate   = document.getElementById("btnGenerate");
 const btnStop       = document.getElementById("btnStop");
@@ -92,16 +127,23 @@ function handleFileSelect(file) {
 
 
 function updateTerminalHint() {
-    const pdf   = selectedFile ? `input/${selectedFile.name}` : "input/book.pdf";
-    const voice = voiceSelect.value;
-    const reset = resetToggle.checked;
+    const pdf    = selectedFile ? `input/${selectedFile.name}` : "input/book.pdf";
+    const engine = engineSelect ? engineSelect.value : "zonos2";
+    const voice  = voiceSelect.value;
+    const reset  = resetToggle.checked;
 
-    let cmd = `python main.py --pdf ${pdf} --voice ${voice}`;
+    let cmd = `python main.py --pdf ${pdf} --engine ${engine} --voice ${voice}`;
     if (reset) cmd += " --reset";
 
     terminalCmd.textContent = cmd;
 }
 
+if (engineSelect) {
+    engineSelect.addEventListener("change", () => {
+        updateVoiceOptions();
+        addLog(`Engine switched to: ${engineSelect.value.toUpperCase()}`, "info");
+    });
+}
 voiceSelect.addEventListener("change",  updateTerminalHint);
 resetToggle.addEventListener("change",  updateTerminalHint);
 
@@ -128,9 +170,10 @@ btnGenerate.addEventListener("click", async () => {
     }
 
     const formData = new FormData();
-    formData.append("pdf",   selectedFile);
-    formData.append("voice", voiceSelect.value);
-    formData.append("reset", resetToggle.checked ? "true" : "false");
+    formData.append("pdf",    selectedFile);
+    formData.append("engine", engineSelect ? engineSelect.value : "zonos2");
+    formData.append("voice",  voiceSelect.value);
+    formData.append("reset",  resetToggle.checked ? "true" : "false");
 
     resetUI();
     setRunningState(true);

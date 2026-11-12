@@ -1,4 +1,8 @@
-import fitz                  # PyMuPDF — the library that reads PDF files
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
+
 import logging               # Python's built-in logging system
 from pathlib import Path     # Safe cross-platform file path handling
 
@@ -10,6 +14,7 @@ def setup_logging():
     level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
     handlers = []
     
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8')
     handlers.append(file_handler)
     
@@ -23,7 +28,8 @@ def setup_logging():
         handlers=handlers
     )
     
-def extract_text_from_pdf(pdf_path: Path) -> list[str]:
+def extract_text_from_pdf(pdf_path: Path | str) -> list[str]:
+    pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         logger.error(f"PDF file not found: {pdf_path}")
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
@@ -69,8 +75,8 @@ def clean_page_text(raw_text: str) -> str:
     
     return text
      
-def get_pdf_metadata(pdf_path: Path) -> dict:
-    
+def get_pdf_metadata(pdf_path: Path | str) -> dict:
+    pdf_path = Path(pdf_path)
     with fitz.open(pdf_path) as doc:
         meta = doc.metadata
         

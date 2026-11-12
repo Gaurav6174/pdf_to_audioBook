@@ -1,304 +1,159 @@
-# PDF Bark Reader
-Convert any PDF book into a natural-sounding audiobook using
-Suno's Bark AI text-to-speech model.
+# PDF to Audiobook Generator
+
+Convert any PDF book into a natural-sounding, high-fidelity audiobook using:
+- **Zyphra ZONOS2** (MoE TTS, 4-bit Quantization `zonos2-q4_k.gguf`, 44.1 kHz studio audio)
+- **Suno Bark** (Transformer neural audio synthesis, 24 kHz)
+
+Both engines are fully integrated with automatic GPU/VRAM acceleration, progress tracking, live SSE logging, and a modern web interface.
+
+---
+
+## Supported TTS Engines
+
+| Feature | Zyphra ZONOS2 (Quant 4) ★ | Suno Bark |
+|---------|---------------------------|-----------|
+| **Architecture** | Mixture of Experts (MoE) + DAC Vocoder | Transformer Semantic + Coarse/Fine Acoustic |
+| **Quantization** | Q4_K GGUF (~4.9 GB) | FP16 / Small Models |
+| **Hardware Fit** | Tuned for ~4GB VRAM (e.g. RTX 2050) | ~4-6GB VRAM |
+| **Audio Sample Rate** | **44,100 Hz** (Studio Quality) | 24,000 Hz |
+| **Inference Engine** | High-performance native `zonos2-server` / `zonos2-cli` | PyTorch / Transformers / Bark |
+| **Default Voice** | `AmericanMale` | `v2/en_speaker_6` |
+| **Speed** | Real-time generation (~0.2–0.5s per chunk) | ~3–8s per chunk |
 
 ---
 
 ## How It Works
+
 ```
 PDF File
   → Extract text page by page        (PyMuPDF)
   → Split into sentences              (NLTK)
-  → Break into Bark-safe chunks       (text_processor)
-  → Convert each chunk to audio       (Bark TTS)
-  → Merge all chunks into one file    (scipy + numpy)
-  → audiobook.wav
+  → Chunk text                        (text_processor)
+  → Generate audio for each chunk     (Zyphra ZONOS2 Q4 or Suno Bark)
+  → Auto-detect sample rate & merge   (audio_merger: 44.1kHz or 24kHz)
+  → Final audiobook.wav
 ```
 
 ---
 
 ## Project Structure
+
 ```
-pdf-bark-reader/
-├── main.py                  # CLI entry point — runs the full pipeline
-├── app.py                   # Web UI entry point — Flask server on port 5000
-├── config.py                # All settings live here (voice, paths, device)
+pdf_to_audioBook/
+├── main.py                  # CLI entry point (supports --engine and --voice)
+├── app.py                   # Web UI entry point (Flask on port 5000)
+├── config.py                # Central configuration (engine, paths, device)
 ├── requirements.txt         # Python dependencies
-├── .env                     # Your personal machine settings (GPU/CPU)
+├── .env                     # Local environment settings (CUDA/CPU)
 │
 ├── input/                   # Drop your PDF books here
 ├── output/
-│   ├── chunks/              # Individual sentence .wav files
+│   ├── chunks/              # Generated chunk .wav files
 │   ├── final/               # Final merged audiobook.wav
 │   └── progress.json        # Auto-saved progress tracker
-├── models/                  # Bark model weights cached here
-├── logs/                    # run.log lives here
+├── tools/
+│   └── zonos2/              # Standalone GGML/GGUF ZONOS2 engine
+│       ├── zonos2-server    # High-performance local HTTP server
+│       ├── zonos2-cli       # Offline synthesis CLI
+│       ├── models/          # zonos2-q4_k.gguf, dac.gguf, spk-encoder.gguf
+│       └── default_voices/  # AmericanMale, AmericanFemale, BritishFemale
 ├── templates/
 │   └── index.html           # Web UI template
 ├── static/
-│   ├── style.css            # Dark-theme stylesheet
-│   └── script.js            # UI logic (SSE, GPU polling, controls)
+│   ├── style.css            # Dark cyberpunk stylesheet
+│   └── script.js            # UI logic (SSE stream, engine switcher, GPU stats)
 └── src/
-    ├── pdf_extractor.py     # Opens PDF, extracts and cleans text
-    ├── text_processor.py    # Splits text into Bark-safe chunks
-    ├── progress_tracker.py  # Saves/resumes progress to JSON
-    ├── tts_engine.py        # Loads Bark, generates audio chunks
-    └── audio_merger.py      # Merges chunks into final audiobook
+    ├── pdf_extractor.py     # PDF text extraction
+    ├── text_processor.py    # Chunk splitting
+    ├── progress_tracker.py  # JSON progress saving/resuming
+    ├── tts_engine.py        # Unified engine (Zonos2 Q4 + Bark)
+    └── audio_merger.py      # Sample-rate-aware audio concatenation
 ```
-
----
-
-## Requirements
-
-- Python 3.10
-- Anaconda (recommended)
-- NVIDIA GPU (recommended — CPU works but is very slow)
-- ~3GB disk space for Bark model weights (downloaded automatically)
 
 ---
 
 ## Setup & Installation
 
-### Step 1 — Clone or download the project
+### Step 1 — Activate Python environment (Python 3.10)
 ```bash
-cd path/to/where/you/want/it
-```
-
-### Step 2 — Create and activate Conda environment
-```bash
-conda create -n pdf-bark-reader python=3.10
 conda activate pdf-bark-reader
+# or: source /home/maximus/yes/envs/venv/bin/activate
 ```
 
-### Step 3 — Install PyTorch (do this BEFORE requirements.txt)
-
-**If you have an NVIDIA GPU:**
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
-
-**If you have no GPU (CPU only):**
-```bash
-pip install torch torchvision torchaudio
-```
-
-### Step 4 — Install all other dependencies
+### Step 2 — Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Step 5 — Download NLTK tokenizer data (one time only)
-```bash
-python -c "import nltk; nltk.download('punkt_tab')"
-```
+### Step 3 — Download ZONOS2 Q4 weights (if not already downloaded)
+The required GGUF model files for 4GB VRAM hardware from [HuggingFace Zyphra/ZONOS2-GGUF](https://huggingface.co/Zyphra/ZONOS2-GGUF/tree/main):
+- `zonos2-q4_k.gguf` (~4.9 GB) — Q4_K experts with F16 spine
+- `dac.gguf` (~254 MB) — Descript Audio Codec 44.1 kHz decoder
+- `spk-encoder.gguf` (~24 MB) — ECAPA speaker encoder
 
-### Step 6 — Configure your .env file
-Open `.env` and set your device:
-```
-DEVICE=cuda   # if you have NVIDIA GPU
-DEVICE=cpu    # if you have no GPU
+They are located in `tools/zonos2/models/`. You can also trigger the built-in downloader:
+```bash
+cd tools/zonos2
+./start-zonos2.sh --quant q4_k -y --no-browser
 ```
 
 ---
 
 ## Usage
 
-### Web UI (recommended)
+### 1. Web UI (Recommended)
 ```bash
 python app.py
 ```
-Then open `http://localhost:5000` in your browser.
+Open **`http://localhost:5000`** in your browser.
+- Select your engine (**Zyphra ZONOS2** or **Suno Bark**).
+- Choose your desired voice preset.
+- Upload any PDF file and click **GENERATE AUDIOBOOK**.
+- Track real-time progress, live logs, and GPU temperature/VRAM load.
+- Download the final `audiobook.wav` when complete!
 
-### CLI
+### 2. Command Line Interface (CLI)
 ```bash
-# Basic run (uses input/book.pdf by default)
-python main.py
+# Run with ZONOS2 (default, Quant 4, American Male)
+python main.py --pdf input/book.pdf
 
-# Specify a PDF file
-python main.py --pdf input/mybook.pdf
+# Run with ZONOS2 and a specific voice
+python main.py --pdf input/book.pdf --engine zonos2 --voice BritishFemale
 
-# Use a different voice
-python main.py --pdf input/mybook.pdf --voice v2/en_speaker_3
+# Run with Suno Bark
+python main.py --pdf input/book.pdf --engine bark --voice v2/en_speaker_6
 
-# Reset progress and start fresh
-python main.py --pdf input/mybook.pdf --reset
+# Reset saved progress and start from chunk 0
+python main.py --pdf input/book.pdf --reset
 
-# Re-merge existing chunks without re-running Bark
+# Re-merge existing chunks without re-synthesizing
 python main.py --merge-only
-
-# See all options
-python main.py --help
 ```
-
----
-
-## Web UI Features
-
-The web interface (`app.py`) exposes the full pipeline through a dark-theme single-page app.
-
-### Controls — `// 03`
-| Button | Description |
-|--------|-------------|
-| `▶ GENERATE AUDIOBOOK` | Upload PDF and run the full pipeline |
-| `■ STOP GENERATION` | Gracefully halt TTS mid-run (visible only while running); progress is preserved — resume any time |
-| `⊕ MERGE CHUNKS ONLY` | Stitch already-generated chunks into a final WAV without re-running Bark |
-| `✕ CLEAR OUTPUT` | Delete all chunks, the final WAV, and the progress file to start completely clean |
-| `↓ DOWNLOAD AUDIOBOOK` | Download the finished `audiobook.wav` (enabled after successful run) |
-
-### Progress — `// 04`
-Live stage indicators (EXTRACT → PROCESS → GENERATE → MERGE), a progress bar with animated scanner, and a running ETA readout.
-
-### Live Log — `// 05`
-Real-time log stream via SSE with auto-scroll toggle.
-
-### GPU Monitor — `// 07`
-Live hardware readout, polled every 2 seconds via `nvidia-smi`:
-
-| Metric | Display |
-|--------|---------|
-| GPU name | Gold header |
-| Temperature | Colour bar: green < 65°C → gold < 80°C → red |
-| GPU load | Gold gradient bar, 0–100% |
-| VRAM used / total | Blue gradient bar |
-
-Requires an NVIDIA GPU and `nvidia-smi` in PATH. Shows "No NVIDIA GPU detected" otherwise.
-
-### API Routes
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/` | GET | Web UI |
-| `/upload` | POST | Start pipeline (PDF + voice + reset flag) |
-| `/stream` | GET | SSE progress stream |
-| `/status` | GET | `{is_running, last_result}` — used for page-load reconnection |
-| `/stop` | POST | Signal the running pipeline to stop after the current chunk |
-| `/clear` | POST | Delete chunks, final WAV, and progress file |
-| `/merge` | POST | Merge-only mode |
-| `/download` | GET | Download finished audiobook |
-| `/gpu_stats` | GET | `{available, name, temperature, utilization, memory_used, memory_total}` |
 
 ---
 
 ## Available Voices
 
-Change the voice in `config.py` or via `--voice` flag (CLI) / voice selector (web UI).
+### Zyphra ZONOS2 Presets
+- `AmericanMale` — American Male (Default) ★
+- `AmericanFemale` — American Female
+- `BritishFemale` — British Female
 
-| Preset | Style |
-|--------|-------|
-| `v2/en_speaker_0` | Male, deep |
-| `v2/en_speaker_1` | Male, neutral |
-| `v2/en_speaker_2` | Male, clear |
-| `v2/en_speaker_3` | Male, expressive |
-| `v2/en_speaker_4` | Male, soft |
-| `v2/en_speaker_5` | Female, neutral |
-| `v2/en_speaker_6` | Male, natural — default |
-| `v2/en_speaker_7` | Female, clear |
-| `v2/en_speaker_8` | Female, expressive |
-| `v2/en_speaker_9` | Female, soft |
+### Suno Bark Presets
+- `v2/en_speaker_6` — Male, Natural (Bark Default) ★
+- `v2/en_speaker_0` through `v2/en_speaker_4` — Male (Deep, Clear, Expressive, Soft)
+- `v2/en_speaker_5`, `v2/en_speaker_7` through `v2/en_speaker_9` — Female (Neutral, Clear, Expressive, Soft)
 
 ---
 
-## Performance Expectations
+## Hardware Optimization (RTX 2050 / 4GB VRAM)
 
-| Hardware | Per Chunk | 500 Chunk Book |
-|----------|-----------|----------------|
-| NVIDIA RTX 3080 | ~3-5 sec | ~45 min |
-| NVIDIA GTX 1660 | ~8-12 sec | ~90 min |
-| CPU only | ~60-120 sec | ~12-24 hours |
-
-> **Tip:** Always use GPU if possible. CPU processing a full
-> book overnight is doable but not fun.
-
----
-
-## Resume After Interruption
-
-If the process is interrupted (Ctrl+C, STOP button, crash, power cut):
-```bash
-# Just run the same command again — or re-upload in the web UI
-python main.py --pdf input/mybook.pdf
-```
-
-Progress is saved after every single chunk. You will
-automatically resume from where you left off.
-
-To start completely fresh:
-```bash
-python main.py --pdf input/mybook.pdf --reset
-# or click CLEAR OUTPUT + GENERATE AUDIOBOOK in the web UI
-```
-
----
-
-## Configuration Reference
-
-All settings are in `config.py`:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `BARK_VOICE_PRESET` | `v2/en_speaker_6` | Voice to use |
-| `USE_SMALL_MODELS` | `True` | Faster but slightly lower quality |
-| `MAX_CHUNK_CHARS` | `180` | Max characters per Bark chunk |
-| `MIN_CHUNK_CHARS` | `10` | Skip chunks shorter than this |
-| `PAUSE_BETWEEN_CHUNKS_MS` | `400` | Silence between sentences (ms) |
-| `RESUME_ENABLED` | `True` | Auto-resume on restart |
-| `SAMPLE_RATE` | `24000` | Bark's audio sample rate (do not change) |
-| `LOG_LEVEL` | `INFO` | Logging verbosity |
-
----
-
-## Known Limitations
-
-**Scanned PDFs won't work**
-Scanned books are images of text — not real text.
-PyMuPDF can only read real embedded text.
-Solution: Run the PDF through an OCR tool first
-(e.g. Adobe Acrobat, Tesseract OCR).
-
-**Bark can sound inconsistent**
-Bark is non-deterministic — the same text can sound
-slightly different each run. This is normal behavior.
-
-**Very long books take a long time**
-A 500-page book = ~800 chunks = several hours even on GPU.
-The progress tracker handles this — just let it run overnight.
-
-**Non-English text**
-Bark supports multiple languages but quality varies.
-English gives the best results by far.
-
----
-
-## Troubleshooting
-
-**"PDF file not found"**
-→ Make sure your PDF is inside the `input/` folder
-→ Check the filename spelling matches exactly
-
-**"No text chunks were produced"**
-→ Your PDF is likely scanned/image-based
-→ Run it through OCR first
-
-**"CUDA out of memory"**
-→ Set `USE_SMALL_MODELS = True` in config.py
-→ Or set `DEVICE=cpu` in .env (slower but uses RAM not VRAM)
-
-**Audio sounds garbled or cuts off**
-→ A chunk likely exceeded Bark's token limit
-→ Try reducing `MAX_CHUNK_CHARS` to `150` in config.py
-
-**Installation errors with Bark**
-→ Make sure PyTorch was installed BEFORE requirements.txt
-→ Confirm Python version is exactly 3.10
-
-**GPU monitor shows "No NVIDIA GPU detected"**
-→ Confirm `nvidia-smi` is installed and accessible in your PATH
-→ On CPU-only machines this is expected and harmless
+The **Q4_K** quantization (`zonos2-q4_k.gguf`) retains the F16 spine (attention + router + speaker projection) while quantizing the MoE expert weights to 4-bit. This fits inside ~4GB VRAM with near-lossless audio fidelity (eval noise difference vs F16 ref), running at real-time speeds on NVIDIA GPUs.
 
 ---
 
 ## Credits
-- [Suno Bark](https://github.com/suno-ai/bark) — TTS model
-- [PyMuPDF](https://pymupdf.readthedocs.io/) — PDF text extraction
-- [NLTK](https://www.nltk.org/) — Sentence tokenization
-
-
+- [Zyphra ZONOS2](https://github.com/Zyphra/zonos2.cpp) & [ZONOS2-GGUF](https://huggingface.co/Zyphra/ZONOS2-GGUF) — Zonos2 MoE TTS
+- [Suno Bark](https://github.com/suno-ai/bark) — Bark Neural TTS
+- [PyMuPDF](https://pymupdf.readthedocs.io/) — PDF extraction
+- [NLTK](https://www.nltk.org/) — Text tokenization

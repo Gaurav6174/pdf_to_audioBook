@@ -6,7 +6,7 @@ import shutil
 import logging
 import subprocess
 import threading
-from pathlib  import Path
+from pathlib import Path
 from datetime import datetime
 
 from flask import (
@@ -20,40 +20,38 @@ from flask import (
 
 from dotenv import load_dotenv
 
-#load .env file
+# load .env file
 load_dotenv()
 
-#pipeline module import
-from src.pdf_extractor   import setup_logging, extract_text_from_pdf, get_pdf_metadata
-from src.text_processor  import process_pages
+# pipeline module imports
+from src.pdf_extractor import setup_logging, extract_text_from_pdf, get_pdf_metadata
+from src.text_processor import process_pages
 from src.progress_tracker import ProgressTracker
-from src.tts_engine      import load_models, process_chunks
-from src.audio_merger    import merge_chunks, merge_all_chunks_from_dir
+from src.tts_engine import load_models, process_chunks, generate_audio_chunk, stop_zonos_server
+from src.audio_merger import merge_chunks, merge_all_chunks_from_dir
 
-#import config variables
+# import config variables
 from config import (
-   INPUT_DIR,
+    INPUT_DIR,
     CHUNKS_DIR,
     FINAL_DIR,
     FINAL_OUTPUT_FILENAME,
+    TTS_ENGINE,
     BARK_VOICE_PRESET,
+    ZONOS_VOICE_PRESET,
     RESUME_ENABLED,
     PROGRESS_FILE
 )
 
-#setup
-
+# setup
 app = Flask(__name__)
-
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 setup_logging()
 
 logger = logging.getLogger(__name__)
 
-#global state
-
+# global state
 progress_queue = queue.Queue()
-
 is_running = False
 stop_event = threading.Event()
 
@@ -63,7 +61,7 @@ last_result = {
     "error": None
 }
 
-#sending progress updates to the frontend via SSE
+# sending progress updates to the frontend via SSE
 def send_progress(message: str, percent: int = None, eta: str = None, status: str = None):
     update = {
         "message": message,
@@ -72,13 +70,10 @@ def send_progress(message: str, percent: int = None, eta: str = None, status: st
         "status": status,
         "time": datetime.now().strftime("%H:%M:%S")
     }
-    
-    
     progress_queue.put(json.dumps(update))
     logger.info(f"[UI] {message}")
     
-#eta calculation
-
+# eta calculation
 def calculate_eta(completed: int, total: int, start_time: float) -> str:
     if completed < 3:
         return "Calculating..."
@@ -97,11 +92,8 @@ def calculate_eta(completed: int, total: int, start_time: float) -> str:
         minutes = int((remaining % 3600) / 60)
         return f"~{hours}h {minutes}m remaining"
 
-
-#pipeline thread
-
-def run_pipeline(pdf_path: Path, voice: str, reset: bool):
-    
+# pipeline thread
+def run_pipeline(pdf_path: Path, voice: str, reset: bool, engine: str = TTS_ENGINE):
     global is_running, last_result
 
     is_running = True
@@ -113,9 +105,8 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
     }
     
     try:
-        #extract
-        send_progress("Extracting text from PDF...", percent =5)
-
+        # extract
+        send_progress("Extracting text from PDF...", percent=5)
         metadata = get_pdf_metadata(pdf_path)
         
         send_progress(
@@ -125,11 +116,11 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
         
         pages = extract_text_from_pdf(pdf_path)
         send_progress(
-            f" Extracted text from {len(pages)} pages.",
+            f"Extracted text from {len(pages)} pages.",
             percent=12
         )
         
-        #process
+        # process
         send_progress("Processing text into chunks...", percent=15)
         chunks = process_pages(pages)   
         
@@ -143,26 +134,14 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
             )
             return 
             
-        #TTS
-        send_progress("Loading Bark AI Model...", percent=22)
+        # TTS Initialization
+        engine_label = "Zyphra ZONOS2 (Quant 4)" if engine == "zonos2" else "Suno Bark"
+        send_progress(f"Loading {engine_label} AI Model...", percent=22)
         
-        import src.tts_engine as tts_module
-        original_voice = tts_module.BARK_VOICE_PRESET
+        load_models(engine=engine)
+        send_progress("Model ready. Generating audio...", percent=30)
         
-         #monkey patching
-        import bark
-        original_generate = tts_module.generate_audio 
-        
-        def generate_with_voice(text, history_prompt=None):
-            return bark.generate_audio(text, history_prompt=voice)
-
-        tts_module.generate_audio = generate_with_voice
-        
-        #loading model
-        load_models()
-        send_progress("Model loaded. Generating audio...", percent=30)
-        
-        #rpogress tracker
+        # progress tracker
         tracker = ProgressTracker(
             pdf_name = pdf_path.name,
             total_chunks = total_chunks,
@@ -171,7 +150,6 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
         if reset:
             tracker.reset()
             send_progress("Progress reset. Starting from chunk 0.", percent=25)
-
         elif tracker.get_summary()['completed'] > 0:
             done = tracker.get_summary()['completed']
             send_progress(
@@ -179,7 +157,6 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
                 percent=25
             )
 
-        #chunk woth live progress
         CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
         
         generated_files = []
@@ -195,8 +172,7 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
                 continue
             
             try:
-                from src.tts_engine import generate_audio_chunk
-                output_path = generate_audio_chunk(text, index)
+                output_path = generate_audio_chunk(text, index, engine=engine, voice=voice)
                 tracker.mark_complete(index)
                 generated_files.append(output_path)
             except Exception as e:
@@ -204,19 +180,15 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
                 tracker.mark_failed(index)
                 continue        
                 
-            # Calculate progress
             completed = len(tracker.completed_chunks)
             percent   = 25 + int((completed / total_chunks) * 60)
-            
             eta = calculate_eta(completed, total_chunks, tts_start_time)
             
             send_progress(
-                f" Generating chunk {completed}/{total_chunks}...",
+                f"Generating chunk {completed}/{total_chunks} ({engine.upper()})...",
                 percent=percent,
                 eta=eta
             )
-            
-        tts_module.generate_audio = original_generate
 
         if stop_event.is_set():
             last_result = {"status": "stopped", "output_path": None, "error": None}
@@ -230,14 +202,10 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
             percent=87
         )
         
-        #merge
-        
+        # merge
         send_progress("Merging audio chunks...", percent=90)
-        
         final_path = merge_chunks(generated_files)
         
-        #final Audio Book generation
-        import numpy as np
         import scipy.io.wavfile as wav_reader
         sample_rate, audio_data = wav_reader.read(str(final_path))
         duration_seconds = len(audio_data) / sample_rate
@@ -250,7 +218,7 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
         }
 
         send_progress(
-            f"Audiobook complete! Duration: {duration_minutes} minutes.",
+            f"Audiobook complete! Duration: {duration_minutes}m ({int(duration_seconds)}s) at {sample_rate}Hz.",
             percent=100,
             eta="Done!",
             status="complete"
@@ -265,17 +233,41 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool):
         )
 
     finally:
-        #release the running lock when done
         is_running = False
         stop_event.clear()
-        
-        
-#Routes
+
+# Routes
 
 @app.route("/")
 def index():
-    return render_template("index.html", default_voice=BARK_VOICE_PRESET)
-    
+    return render_template(
+        "index.html",
+        default_engine=TTS_ENGINE,
+        default_voice=ZONOS_VOICE_PRESET if TTS_ENGINE == "zonos2" else BARK_VOICE_PRESET
+    )
+
+@app.route("/voices")
+def get_voices():
+    return jsonify({
+        "zonos2": [
+            {"id": "AmericanMale", "name": "American Male (Default) ★"},
+            {"id": "AmericanFemale", "name": "American Female"},
+            {"id": "BritishFemale", "name": "British Female"}
+        ],
+        "bark": [
+            {"id": "v2/en_speaker_6", "name": "en_speaker_6 — Male, Natural ★"},
+            {"id": "v2/en_speaker_0", "name": "en_speaker_0 — Male, Deep"},
+            {"id": "v2/en_speaker_1", "name": "en_speaker_1 — Male, Neutral"},
+            {"id": "v2/en_speaker_2", "name": "en_speaker_2 — Male, Clear"},
+            {"id": "v2/en_speaker_3", "name": "en_speaker_3 — Male, Expressive"},
+            {"id": "v2/en_speaker_4", "name": "en_speaker_4 — Male, Soft"},
+            {"id": "v2/en_speaker_5", "name": "en_speaker_5 — Female, Neutral"},
+            {"id": "v2/en_speaker_7", "name": "en_speaker_7 — Female, Clear"},
+            {"id": "v2/en_speaker_8", "name": "en_speaker_8 — Female, Expressive"},
+            {"id": "v2/en_speaker_9", "name": "en_speaker_9 — Female, Soft"}
+        ]
+    })
+
 @app.route("/upload", methods=["POST"])
 def upload():
     global is_running
@@ -297,31 +289,27 @@ def upload():
     if not file.filename.lower().endswith(".pdf"):
         return jsonify({"success": False, "error": "File must be a PDF."}), 400
 
-    #save the uploaded pdf
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
     pdf_path = INPUT_DIR / file.filename
     file.save(str(pdf_path))
     logger.info(f"PDF uploaded: {pdf_path}")
     
-    #read the users selected voice preset
-    voice_preset = request.form.get("voice", BARK_VOICE_PRESET)
-    reset = request.form.get("reset", "false").lower() == "true" #
+    engine = request.form.get("engine", TTS_ENGINE).lower()
+    default_v = ZONOS_VOICE_PRESET if engine == "zonos2" else BARK_VOICE_PRESET
+    voice_preset = request.form.get("voice", default_v)
+    reset = request.form.get("reset", "false").lower() == "true"
 
-        #start the pipeline in a separate thread
-        
-    # daemon=True means the thread dies automatically if Flask shuts down
     thread = threading.Thread(
         target=run_pipeline,
-        args=(pdf_path, voice_preset, reset),
+        args=(pdf_path, voice_preset, reset, engine),
         daemon=True
     )
     thread.start()
     
-    return jsonify({"success": True, "filename": file.filename})
+    return jsonify({"success": True, "filename": file.filename, "engine": engine, "voice": voice_preset})
     
 @app.route("/stream")
 def stream():
-
     def event_stream():
         while True:
             try:
@@ -331,17 +319,14 @@ def stream():
                 parsed = json.loads(update)
                 if parsed.get("status") in ("complete", "error", "stopped"):
                     break
-                
             except queue.Empty:
-                yield "data: {\"type\": \"heartbeat\"}\n\n" #kkeps the connection alive
+                yield "data: {\"type\": \"heartbeat\"}\n\n"
 
     return Response(
         event_stream(),
         mimetype="text/event-stream",
-        headers ={
-            # Disable caching, SSE must always be fresh
+        headers={
             "Cache-Control": "no-cache",
-            # Keep connection open
             "X-Accel-Buffering": "no"
         }
     )
@@ -355,12 +340,10 @@ def status():
 
 @app.route("/download")
 def download():
-    #Only available after a successful pipeline run.
     if last_result["status"] != "complete":
         return jsonify({"error": "No audiobook available yet."}), 404
         
     output_path = Path(last_result["output_path"])
-
     if not output_path.exists():
         return jsonify({"error": "Audiobook file not found on disk."}), 404
         
@@ -373,10 +356,7 @@ def download():
     
 @app.route("/merge", methods=["POST"])
 def merge_only():
-    #allows merging of chunks without re-running the entire pipeline
-
     global is_running
-    
     if is_running:
         return jsonify({
             "success": False,
@@ -385,7 +365,6 @@ def merge_only():
         
     def run_merge():
         global is_running, last_result
-        
         is_running = True
         last_result = {"status": "running", "output_path": None, "error": None}
         
@@ -398,17 +377,11 @@ def merge_only():
                 "output_path": str(final_path),
                 "error": None
             }
-            
             send_progress("Merge complete!", percent=100, status="complete")
-            
         except Exception as e:
             logger.error(f"Merge error: {e}", exc_info=True)
             last_result = {"status": "error", "output_path": None, "error": str(e)}
-            send_progress(
-                f"Error during merge: {str(e)}",
-                status="error"
-            )
-            
+            send_progress(f"Error during merge: {str(e)}", status="error")
         finally:
             is_running = False
             
@@ -426,17 +399,14 @@ def clear_output():
     if is_running:
         return jsonify({"success": False, "error": "Cannot clear while a job is running."}), 409
 
-    # Delete all chunk wav files
     if CHUNKS_DIR.exists():
         for f in CHUNKS_DIR.glob("*.wav"):
             f.unlink()
 
-    # Delete final output wav files
     if FINAL_DIR.exists():
         for f in FINAL_DIR.glob("*.wav"):
             f.unlink()
 
-    # Delete progress file
     if PROGRESS_FILE.exists():
         PROGRESS_FILE.unlink()
 
@@ -471,17 +441,11 @@ def gpu_stats():
     except Exception:
         return jsonify({"available": False})
 
-
-#final entry point
 if __name__ == "__main__":
-    
     print("Go to http://localhost:5000")
-    
     app.run(
-        host="0.0.0.0",    # accessible on local network too
+        host="0.0.0.0",
         port=5000,
         debug=False,
         threaded=True
     )
-    
-    

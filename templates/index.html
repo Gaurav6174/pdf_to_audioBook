@@ -29,8 +29,8 @@
                     <span></span><span></span><span></span>
                 </div>
                 <div class="logo-text">
-                    <h1>PDF<span class="accent">BARK</span></h1>
-                    <p class="tagline">// AI AUDIOBOOK GENERATOR</p>
+                    <h1>PDF<span class="accent">AUDIO</span></h1>
+                    <p class="tagline">// AI AUDIOBOOK GENERATOR (ZONOS2 & BARK)</p>
                 </div>
             </div>
             <!-- Live status pill in top right -->
@@ -90,20 +90,22 @@
             <div class="card options-card">
                 <div class="card-label">// 02 — OPTIONS</div>
 
+                <!-- Engine selector -->
+                <div class="option-group">
+                    <label class="option-label">TTS ENGINE</label>
+                    <select class="option-select" id="engineSelect">
+                        <option value="zonos2" selected>Zyphra ZONOS2 (Quant 4 — Fast & High Fidelity) ★</option>
+                        <option value="bark">Suno Bark (Neural Voice Synthesis)</option>
+                    </select>
+                </div>
+
                 <!-- Voice selector -->
                 <div class="option-group">
                     <label class="option-label">VOICE PRESET</label>
                     <select class="option-select" id="voiceSelect">
-                        <option value="v2/en_speaker_0">en_speaker_0 — Male, Deep</option>
-                        <option value="v2/en_speaker_1">en_speaker_1 — Male, Neutral</option>
-                        <option value="v2/en_speaker_2">en_speaker_2 — Male, Clear</option>
-                        <option value="v2/en_speaker_3">en_speaker_3 — Male, Expressive</option>
-                        <option value="v2/en_speaker_4">en_speaker_4 — Male, Soft</option>
-                        <option value="v2/en_speaker_5">en_speaker_5 — Female, Neutral</option>
-                        <option value="v2/en_speaker_6" selected>en_speaker_6 — Male, Natural ★</option>
-                        <option value="v2/en_speaker_7">en_speaker_7 — Female, Clear</option>
-                        <option value="v2/en_speaker_8">en_speaker_8 — Female, Expressive</option>
-                        <option value="v2/en_speaker_9">en_speaker_9 — Female, Soft</option>
+                        <option value="AmericanMale" selected>American Male (Default) ★</option>
+                        <option value="AmericanFemale">American Female</option>
+                        <option value="BritishFemale">British Female</option>
                     </select>
                 </div>
 
@@ -320,9 +322,9 @@
          FOOTER
     ───────────────────────────────────────── -->
     <footer class="footer">
-        <span>PDF BARK READER</span>
+        <span>PDF TO AUDIOBOOK</span>
         <span class="footer-sep">×</span>
-        <span>Powered by Suno Bark TTS</span>
+        <span>Powered by Zyphra ZONOS2 (Q4) & Suno Bark</span>
         <span class="footer-sep">×</span>
         <span>Running on localhost:5000</span>
     </footer>
