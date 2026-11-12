@@ -148,8 +148,31 @@ def _fetch_zonos_speakers(host: str = ZONOS_HOST, port: int = ZONOS_PORT) -> dic
         logger.warning(f"Could not fetch ZONOS2 speakers from server: {e}")
     return _zonos_speakers_cache
 
+def _ensure_vulkan_icd():
+    """Configures Vulkan ICD for NVIDIA GPUs in containers (Kaggle/Colab)."""
+    if not Path("/proc/driver/nvidia/version").exists() and not Path("/dev/nvidia0").exists():
+        return
+
+    icd_targets = [
+        Path("/usr/share/vulkan/icd.d/nvidia_icd.json"),
+        Path("/etc/vulkan/icd.d/nvidia_icd.json")
+    ]
+    if not any(p.exists() for p in icd_targets):
+        try:
+            target = Path("/etc/vulkan/icd.d/nvidia_icd.json")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            content = '{\n    "file_format_version" : "1.0.1",\n    "ICD": {\n        "library_path": "libGLX_nvidia.so.0",\n        "api_version" : "1.3.0"\n    }\n}\n'
+            target.write_text(content)
+            os.environ["VK_ICD_FILENAMES"] = str(target)
+            logger.info(f"Auto-configured NVIDIA Vulkan ICD at {target}")
+        except Exception as e:
+            logger.warning(f"Could not auto-configure Vulkan ICD: {e}")
+
 def _spawn_server(backend: str, max_wait_seconds: int = 90) -> bool:
     global _zonos_server_process
+
+    if backend == "gpu":
+        _ensure_vulkan_icd()
 
     logger.info(f"Starting ZONOS2 server on http://{ZONOS_HOST}:{ZONOS_PORT} (Backend: {backend.upper()})...")
     logger.info(f"Model: {ZONOS_MODEL_FILE.name} (Quant: {ZONOS_QUANT.upper()})")
@@ -201,6 +224,14 @@ def _spawn_server(backend: str, max_wait_seconds: int = 90) -> bool:
 
         if is_zonos_server_healthy():
             logger.info(f"ZONOS2 server is up and responsive on {backend.upper()} backend.")
+            try:
+                server_log.flush()
+                log_text = Path("logs/zonos_server.log").read_text(errors="ignore")
+                last_backend = [l for l in log_text.splitlines() if "zonos2: backend =" in l]
+                if last_backend:
+                    logger.info(f"Active runtime device: {last_backend[-1]}")
+            except Exception:
+                pass
             _fetch_zonos_speakers()
             return True
 

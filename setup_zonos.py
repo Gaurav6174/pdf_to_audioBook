@@ -30,7 +30,28 @@ def download_progress(block_num, block_size, total_size):
         sys.stdout.write(f"\r  Downloaded: {downloaded / (1024 * 1024):.1f} MB")
     sys.stdout.flush()
 
+def setup_vulkan_icd():
+    """Ensures Vulkan recognizes NVIDIA GPUs in containerized environments like Kaggle/Colab."""
+    if not Path("/proc/driver/nvidia/version").exists() and not Path("/dev/nvidia0").exists():
+        return
+
+    icd_paths = [
+        Path("/usr/share/vulkan/icd.d/nvidia_icd.json"),
+        Path("/etc/vulkan/icd.d/nvidia_icd.json")
+    ]
+    if not any(p.exists() for p in icd_paths):
+        try:
+            target = Path("/etc/vulkan/icd.d/nvidia_icd.json")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            content = '{\n    "file_format_version" : "1.0.1",\n    "ICD": {\n        "library_path": "libGLX_nvidia.so.0",\n        "api_version" : "1.3.0"\n    }\n}\n'
+            target.write_text(content)
+            os.environ["VK_ICD_FILENAMES"] = str(target)
+            print(f"✓ Configured NVIDIA Vulkan ICD at {target}")
+        except Exception as e:
+            print(f"Note: Could not write Vulkan ICD ({e})")
+
 def setup_binaries():
+    setup_vulkan_icd()
     cli_bin = ZONOS_DIR / "zonos2-cli"
     if cli_bin.exists() and os.access(str(cli_bin), os.X_OK):
         print("✓ Zonos2 runtime binaries already installed.")
