@@ -173,6 +173,16 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool, engine: str = TTS_ENGI
                 chunk_path = CHUNKS_DIR / f"chunk_{index:04d}.wav"
                 generated_files.append(chunk_path)
                 continue
+
+            completed = len(tracker.completed_chunks)
+            percent = 25 + int((completed / total_chunks) * 60)
+            eta = calculate_eta(completed, total_chunks, tts_start_time)
+
+            send_progress(
+                f"Synthesizing chunk {index + 1}/{total_chunks} ({engine.upper()})...",
+                percent=percent,
+                eta=eta
+            )
             
             try:
                 output_path = generate_audio_chunk(text, index, engine=engine, voice=voice)
@@ -188,7 +198,7 @@ def run_pipeline(pdf_path: Path, voice: str, reset: bool, engine: str = TTS_ENGI
             eta = calculate_eta(completed, total_chunks, tts_start_time)
             
             send_progress(
-                f"Generating chunk {completed}/{total_chunks} ({engine.upper()})...",
+                f"Completed chunk {completed}/{total_chunks} ({engine.upper()})...",
                 percent=percent,
                 eta=eta
             )
