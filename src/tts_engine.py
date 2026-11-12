@@ -19,6 +19,7 @@ from config import (
     CPU_OFFLOAD,
     ZONOS_DIR,
     ZONOS_MODELS_DIR,
+    ZONOS_QUANT,
     ZONOS_MODEL_FILE,
     ZONOS_DAC_FILE,
     ZONOS_SPEAKER_FILE,
