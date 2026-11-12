@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-setup_zonos.py — Automated installer for Zyphra ZONOS2 runtime and Q4 GGUF models.
-Runs seamlessly on any Linux system (local Ubuntu, Kaggle, Google Colab).
+setup_zonos.py — Automated installer for Zyphra ZONOS2 runtime and GGUF models.
+Supports any quantization: q4_k (4.9GB), q8_0 (8.5GB recommended for 16GB GPU), or f16 (15.3GB).
 """
 
 import os
@@ -9,6 +9,7 @@ import sys
 import tarfile
 import urllib.request
 import subprocess
+import argparse
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
@@ -17,7 +18,6 @@ MODELS_DIR = ZONOS_DIR / "models"
 
 ZONOS_RELEASE_URL = "https://github.com/Zyphra/zonos2.cpp/releases/download/v0.5.2/zonos2-linux-x64-vulkan.tar.gz"
 HF_BASE_URL = "https://huggingface.co/Zyphra/ZONOS2-GGUF/resolve/main"
-REQUIRED_MODELS = ["zonos2-q4_k.gguf", "dac.gguf", "spk-encoder.gguf"]
 
 def download_progress(block_num, block_size, total_size):
     downloaded = block_num * block_size
@@ -56,11 +56,14 @@ def setup_binaries():
 
     print("✓ Zonos2 C++ runtime binaries ready.")
 
-def setup_models():
+def setup_models(quant: str = "q8_0"):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+    backbone_file = f"zonos2-{quant}.gguf"
+    required_files = [backbone_file, "dac.gguf", "spk-encoder.gguf"]
+
     missing = []
-    for filename in REQUIRED_MODELS:
+    for filename in required_files:
         target = MODELS_DIR / filename
         if target.exists() and target.stat().st_size > 1024 * 1024:
             print(f"✓ {filename} already present ({target.stat().st_size / (1024*1024):.1f} MB)")
@@ -68,12 +71,11 @@ def setup_models():
             missing.append(filename)
 
     if not missing:
-        print("\n✓ All ZONOS2 Q4 models are present and ready!")
+        print(f"\n✓ All ZONOS2 {quant.upper()} models are present and ready!")
         return
 
-    print(f"\nDownloading missing models: {missing}...")
+    print(f"\nDownloading missing models ({quant.upper()}): {missing}...")
 
-    # Try huggingface_hub first, fallback to curl
     hf_available = False
     try:
         from huggingface_hub import hf_hub_download
@@ -93,7 +95,6 @@ def setup_models():
                 local_dir_use_symlinks=False
             )
         else:
-            # Multi-platform curl download
             url = f"{HF_BASE_URL}/{filename}"
             ret = subprocess.run(["curl", "-L", "--progress-bar", "-o", str(target), url])
             if ret.returncode != 0:
@@ -101,14 +102,24 @@ def setup_models():
 
         print(f"✓ {filename} ready.")
 
-    print("\n✓ All ZONOS2 models ready!")
+    print(f"\n✓ All ZONOS2 {quant.upper()} models ready!")
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print(" Setting up Zyphra ZONOS2 (Quantization 4) Engine")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Setup Zyphra ZONOS2 runtime and model weights.")
+    parser.add_argument(
+        "--quant",
+        type=str,
+        default=os.getenv("ZONOS_QUANT", "q8_0"),
+        choices=["q4_k", "q5_k", "q6_k", "q8_0", "f16"],
+        help="Quantization tier to download: 'q8_0' (recommended 8.5GB for 16GB GPU), 'q4_k' (4.9GB), or 'f16' (15.3GB)"
+    )
+    args = parser.parse_args()
+
+    print("=" * 65)
+    print(f" Setting up Zyphra ZONOS2 ({args.quant.upper()}) Engine")
+    print("=" * 65)
     setup_binaries()
-    setup_models()
-    print("=" * 60)
+    setup_models(quant=args.quant)
+    print("=" * 65)
     print(" Setup Complete! You can now run main.py or app.py.")
-    print("=" * 60)
+    print("=" * 65)
