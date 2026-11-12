@@ -39,6 +39,9 @@ from config import (
     TTS_ENGINE,
     BARK_VOICE_PRESET,
     ZONOS_VOICE_PRESET,
+    ZONOS_QUANT,
+    ZONOS_MODEL_FILE,
+    ZONOS_BACKEND,
     RESUME_ENABLED,
     PROGRESS_FILE
 )
@@ -442,7 +445,15 @@ def gpu_stats():
         return jsonify({"available": False})
 
 if __name__ == "__main__":
-    print("Go to http://localhost:5000")
+    print("=" * 60)
+    print(" PDF to Audiobook Web UI Starting...")
+    print(f" Active TTS Engine : {TTS_ENGINE.upper()}")
+    if TTS_ENGINE == "zonos2":
+        print(f" ZONOS Quant       : {ZONOS_QUANT.upper()}")
+        print(f" ZONOS Model File  : {ZONOS_MODEL_FILE.name}")
+        print(f" ZONOS Backend     : {ZONOS_BACKEND.upper()}")
+    print(" Access Web UI at   : http://localhost:5000")
+    print("=" * 60)
     app.run(
         host="0.0.0.0",
         port=5000,
