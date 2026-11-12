@@ -104,6 +104,48 @@ def setup_models(quant: str = "q8_0"):
 
     print(f"\n✓ All ZONOS2 {quant.upper()} models ready!")
 
+def update_env_file(quant: str):
+    env_path = BASE_DIR / ".env"
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    settings = {
+        "ZONOS_QUANT": quant,
+        "TTS_ENGINE": "zonos2"
+    }
+
+    has_gpu = False
+    try:
+        import torch
+        has_gpu = torch.cuda.is_available()
+    except Exception:
+        pass
+    if not has_gpu and Path("/proc/driver/nvidia/version").exists():
+        has_gpu = True
+
+    if has_gpu:
+        settings["ZONOS_BACKEND"] = "gpu"
+        settings["DEVICE"] = "cuda"
+
+    new_keys = set(settings.keys())
+    updated_lines = []
+    for line in lines:
+        if "=" in line and not line.strip().startswith("#"):
+            k = line.split("=", 1)[0].strip()
+            if k in new_keys:
+                updated_lines.append(f"{k}={settings[k]}")
+                new_keys.remove(k)
+                continue
+        updated_lines.append(line)
+
+    for k in new_keys:
+        updated_lines.append(f"{k}={settings[k]}")
+
+    env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+    backend_val = settings.get("ZONOS_BACKEND", "cpu")
+    print(f"✓ Configuration saved to .env (ZONOS_QUANT={quant}, ZONOS_BACKEND={backend_val})")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Setup Zyphra ZONOS2 runtime and model weights.")
     parser.add_argument(
@@ -120,6 +162,7 @@ if __name__ == "__main__":
     print("=" * 65)
     setup_binaries()
     setup_models(quant=args.quant)
+    update_env_file(quant=args.quant)
     print("=" * 65)
     print(" Setup Complete! You can now run main.py or app.py.")
     print("=" * 65)

@@ -151,7 +151,7 @@ def _spawn_server(backend: str, max_wait_seconds: int = 90) -> bool:
     global _zonos_server_process
 
     logger.info(f"Starting ZONOS2 server on http://{ZONOS_HOST}:{ZONOS_PORT} (Backend: {backend.upper()})...")
-    logger.info(f"Model: {ZONOS_MODEL_FILE.name} (Quant 4)")
+    logger.info(f"Model: {ZONOS_MODEL_FILE.name} (Quant: {ZONOS_QUANT.upper()})")
 
     cmd = [
         str(ZONOS_SERVER_BIN),
@@ -213,11 +213,19 @@ def ensure_zonos_server_ready(max_wait_seconds: int = 90) -> bool:
         _fetch_zonos_speakers()
         return True
 
+    global ZONOS_MODEL_FILE, ZONOS_QUANT
     if not ZONOS_MODEL_FILE.exists():
-        raise FileNotFoundError(
-            f"ZONOS2 model file not found at: {ZONOS_MODEL_FILE}\n"
-            f"Ensure the Q4 GGUF weights have completed downloading."
-        )
+        import config
+        resolved_quant, resolved_path = config._resolve_zonos_model()
+        if resolved_path.exists():
+            ZONOS_QUANT = resolved_quant
+            ZONOS_MODEL_FILE = resolved_path
+            logger.info(f"Auto-detected model file on disk: {ZONOS_MODEL_FILE.name}")
+        else:
+            raise FileNotFoundError(
+                f"ZONOS2 model file not found at: {ZONOS_MODEL_FILE}\n"
+                f"Ensure GGUF weights have completed downloading via 'python setup_zonos.py --quant {ZONOS_QUANT}'."
+            )
 
     if not ZONOS_SERVER_BIN.exists() or not os.access(str(ZONOS_SERVER_BIN), os.X_OK):
         if ZONOS_SERVER_BIN.exists():
