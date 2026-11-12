@@ -328,7 +328,7 @@ def _generate_zonos_audio_chunk(text: str, chunk_index: int, voice: str | None =
                 "voice": clean_voice_key,
                 "response_format": "wav"
             }
-            res = requests.post(v1_url, json=v1_payload, timeout=60)
+            res = requests.post(v1_url, json=v1_payload, timeout=180)
             if res.status_code == 200 and len(res.content) > 100:
                 with open(output_path, "wb") as f:
                     f.write(res.content)
@@ -346,7 +346,7 @@ def _generate_zonos_audio_chunk(text: str, chunk_index: int, voice: str | None =
             if speaker_id:
                 body["speaker_embedding_id"] = speaker_id
 
-            res2 = requests.post(gen_url, json=body, timeout=60)
+            res2 = requests.post(gen_url, json=body, timeout=180)
             if res2.status_code == 200 and len(res2.content) > 100:
                 with open(output_path, "wb") as f:
                     f.write(res2.content)
